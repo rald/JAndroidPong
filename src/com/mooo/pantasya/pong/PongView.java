@@ -10,7 +10,7 @@ import android.view.SurfaceView;
 
 import java.util.Random;
 
-public class PongView extends SurfaceView implements Runnable {
+public class PongView extends SurfaceView implements Runnable, SurfaceHolder.Callback {
 
     private Thread gameThread;
     private volatile boolean playing;
@@ -21,18 +21,19 @@ public class PongView extends SurfaceView implements Runnable {
     private final Random random = new Random();
 
     private int screenX, screenY;
-    private float paddleX, paddleY, paddleW, paddleH;
-    private float ballX, ballY, ballSize;
-    private float ballSpeedX = 10, ballSpeedY = 10;
+    private Paddle paddle;
+    private Ball ball;
 
     private int score = 0;
     private int highScore = 0;
     private boolean initialized = false;
+    private boolean surfaceReady = false;
 
     public PongView(Context context, int savedHighScore) {
         super(context);
         activity = (MainActivity) context;
         holder = getHolder();
+        holder.addCallback(this);
         paint = new Paint();
         highScore = savedHighScore;
     }
@@ -42,59 +43,76 @@ public class PongView extends SurfaceView implements Runnable {
     }
 
     @Override
-    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-        screenX = w;
-        screenY = h;
+    public void surfaceCreated(SurfaceHolder holder) {
+        surfaceReady = true;
+        if (ball != null) ball.reset(screenX, screenY);
+    }
 
-        paddleW = screenX / 4f;
-        paddleH = screenY / 30f;
-        paddleX = (screenX - paddleW) / 2f;
-        paddleY = screenY - 120;
+    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        surfaceReady = false;
+        pause();
+    }
 
-        ballSize = screenX / 20f;
+    @Override
+    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+        screenX = width;
+        screenY = height;
+
+        float paddleW = screenX / 4f;
+        float paddleH = screenY / 30f;
+        float paddleX = (screenX - paddleW) / 2f;
+        float paddleY = screenY - 120;
+
+        paddle = new Paddle(paddleX, paddleY, paddleW, paddleH);
+        ball = new Ball(screenX / 20f);
+
         initialized = true;
-        resetBall();
+        ball.reset(screenX, screenY);
     }
 
     @Override
     public void run() {
         while (playing) {
-            update();
-            drawGame();
+            if (surfaceReady && initialized) {
+                update();
+                drawGame();
+            }
             sleep();
         }
     }
 
     private void update() {
-        ballX += ballSpeedX;
-        ballY += ballSpeedY;
+        ball.update();
 
-        if (ballX <= 0 || ballX + ballSize >= screenX) {
-            ballSpeedX = -ballSpeedX;
+        if (ball.getX() <= 0 || ball.getX() + ball.getSize() >= screenX) {
+            ball.bounceX();
         }
 
-        if (ballY <= 0) {
-            ballSpeedY = -ballSpeedY;
+        if (ball.getY() <= 0) {
+            ball.bounceY();
         }
 
-        if (ballY + ballSize >= paddleY &&
-            ballY + ballSize <= paddleY + paddleH &&
-            ballX + ballSize >= paddleX &&
-            ballX <= paddleX + paddleW &&
-            ballSpeedY > 0) {
-            ballSpeedY = -ballSpeedY;
-            ballY = paddleY - ballSize - 1;
+        if (ball.getY() + ball.getSize() >= paddle.getY() &&
+            ball.getY() + ball.getSize() <= paddle.getY() + paddle.getH() &&
+            ball.getX() + ball.getSize() >= paddle.getX() &&
+            ball.getX() <= paddle.getX() + paddle.getW() &&
+            ballSpeedDown()) {
+            ball.bounceY();
+            ball.setY(paddle.getY() - ball.getSize() - 1);
             score++;
-            if (score > highScore) {
-                highScore = score;
-            }
+            if (score > highScore) highScore = score;
         }
 
-        if (ballY > screenY) {
+        if (ball.getY() > screenY) {
             activity.updateHighScore(score);
             score = 0;
-            resetBall();
+            ball.reset(screenX, screenY);
         }
+    }
+
+    private boolean ballSpeedDown() {
+        return true;
     }
 
     private void drawGame() {
@@ -104,26 +122,16 @@ public class PongView extends SurfaceView implements Runnable {
         if (canvas == null) return;
 
         canvas.drawColor(Color.BLACK);
-
         paint.setColor(Color.WHITE);
-        canvas.drawRect(paddleX, paddleY, paddleX + paddleW, paddleY + paddleH, paint);
-        canvas.drawRect(ballX, ballY, ballX + ballSize, ballY + ballSize, paint);
+
+        paddle.draw(canvas, paint);
+        ball.draw(canvas, paint);
 
         paint.setTextSize(60);
         canvas.drawText("Score: " + score, 40, 80, paint);
         canvas.drawText("High: " + highScore, 40, 150, paint);
 
         holder.unlockCanvasAndPost(canvas);
-    }
-
-    private void resetBall() {
-        if (!initialized) return;
-
-        ballX = random.nextInt((int) (screenX - ballSize));
-        ballY = random.nextInt(screenY / 2);
-
-        ballSpeedX = random.nextBoolean() ? 10 : -10;
-        ballSpeedY = 10;
     }
 
     private void sleep() {
@@ -135,9 +143,11 @@ public class PongView extends SurfaceView implements Runnable {
     }
 
     public void resume() {
-        playing = true;
-        gameThread = new Thread(this);
-        gameThread.start();
+        if (gameThread == null || !gameThread.isAlive()) {
+            playing = true;
+            gameThread = new Thread(this);
+            gameThread.start();
+        }
     }
 
     public void pause() {
@@ -148,16 +158,21 @@ public class PongView extends SurfaceView implements Runnable {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
+            gameThread = null;
         }
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        paddleX = event.getX() - paddleW / 2f;
+        if (paddle == null) return true;
 
-        if (paddleX < 0) paddleX = 0;
-        if (paddleX + paddleW > screenX) paddleX = screenX - paddleW;
+        float x = event.getX() - paddle.getW() / 2f;
+        if (x < 0) x = 0;
+        if (x + paddle.getW() > screenX) x = screenX - paddle.getW();
 
+        paddle.setX(x);
         return true;
     }
 }
+
+

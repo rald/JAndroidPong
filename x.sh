@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export ANDROID=$HOME/android-sdk/platforms/android-29/android.jar
+
 rm -rf bin obj gen output game.apk
 
 mkdir bin
@@ -11,17 +13,17 @@ aapt package -f -m \
 	-J gen \
 	-M AndroidManifest.xml \
 	-S res \
-	-I android-29.jar
+	-I $ANDROID
 
-javac -cp android-29.jar -d obj $(find src -name '*.java')
+javac -cp $ANDROID -d obj $(find src -name '*.java')
 
-d8 --lib android-29.jar --output output $(find obj -name '*.class')
+d8 --lib $ANDROID --output output $(find obj -name '*.class')
 
 aapt package -f -m \
 	-J gen \
     -S res \
     -M AndroidManifest.xml \
-    -I android-29.jar \
+    -I $ANDROID \
     -F bin/game.apk \
     output
 

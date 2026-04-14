@@ -33,13 +33,17 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        gameView.resume();
+        if (gameView != null) gameView.resume();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        gameView.pause();
-        updateHighScore(gameView.getScore());
+        if (gameView != null) {
+            gameView.pause();
+            updateHighScore(gameView.getScore());
+        }
     }
 }
+
+
